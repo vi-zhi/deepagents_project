@@ -1,1 +1,4 @@
 MODEL_NAME = "deepseek:deepseek-v4-flash"
+
+SANDBOX_IDLE_TIMEOUT = 300
+SANDBOX_CLEANUP_INTERVAL = 60
