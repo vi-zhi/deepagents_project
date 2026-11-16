@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from .agents import create_agent, _ensure_agents_memory, _remove_per_user_agents_memory
 from .config import DB_URI, SANDBOX_IMAGE
+from .mysql_client import init_mysql_pool, close_mysql_pool
 from .routes import router, set_globals
 from .sandbox import init_sandbox_manager
 
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
         _store.setup()
         _checkpointer.setup()
 
+        init_mysql_pool()
         init_sandbox_manager(SANDBOX_IMAGE)
 
         _agent = create_agent(_checkpointer, _store)
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
         raise
 
     logger.info("Shutting down...")
+    close_mysql_pool()
     stack.close()
     from .sandbox import get_sandbox_manager
     mgr = get_sandbox_manager()
