@@ -1,19 +1,61 @@
 import logging
-from typing import Any
+from typing import Any, List, Optional
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StoreBackend, StateBackend, FilesystemBackend
+from langchain_core.tools import tool
 from langgraph.store.postgres import PostgresStore
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from .config import MODEL_NAME, LOCAL_SKILLS_DIR
 from .context_type import MemoryContext
+from .mysql_client import (
+    query_mysql as _query_mysql_impl,
+    list_mysql_tables as _list_tables_impl,
+    describe_mysql_table as _describe_impl,
+)
 from .namespace_router import user_namespace
 from .sandbox import _OrgScopedSandboxBackendProxy, get_sandbox_manager, _sandbox_available
 
 logger = logging.getLogger(__name__)
 
-# /memories/AGENTS.md 的初始内容（即系统提示词），首次使用时写入 PostgresStore
+
+@tool
+def query_mysql(sql: str, params: Optional[List[Any]] = None, limit: int = 500) -> dict:
+    """Execute a read-only SQL query against the MySQL database and return results.
+
+    Only SELECT / SHOW / DESCRIBE statements are allowed for safety.
+    Use list_mysql_tables first to see available tables, describe_mysql_table
+    to inspect columns, then call this tool with your SELECT.
+
+    Args:
+        sql: SQL statement (SELECT / SHOW / DESCRIBE only).
+        params: Optional parameter values for parameterized queries.
+        limit: Max rows to return (default 500).
+    """
+    stripped = sql.strip().upper()
+    dangerous = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "REPLACE")
+    if any(stripped.startswith(k) for k in dangerous):
+        return {"success": False, "error": f"Write operations are forbidden. Got: {sql[:100]}"}
+    return _query_mysql_impl(sql, params=params, limit=limit)
+
+
+@tool
+def list_mysql_tables() -> dict:
+    """List all table names in the connected MySQL database."""
+    return _list_tables_impl()
+
+
+@tool
+def describe_mysql_table(table_name: str) -> dict:
+    """Show columns and types of a specific MySQL table.
+
+    Args:
+        table_name: Name of the table to inspect.
+    """
+    return _describe_impl(table_name)
+
+
 AGENTS_MEMORY = """你是一个智能助手，可以通过持续对话学习和记录用户的习惯与偏好。
 
 ## 关于用户习惯记录
@@ -196,6 +238,7 @@ def create_agent(checkpointer: PostgresSaver, store: PostgresStore) -> Any:
         context_schema=MemoryContext,
         memory=["/memories/AGENTS.md", "/memories/habits.md"],
         skills=["/skills/"],
+        tools=[query_mysql, list_mysql_tables, describe_mysql_table],
         checkpointer=checkpointer,
         backend=CompositeBackend(
             default=default_backend,
